@@ -111,3 +111,11 @@ def list_audit(tenant_id: int | None = None, limit: int = 200, p: Principal = De
     stmt = tenant_filter(select(AuditLog), AuditLog, p, tenant_id).order_by(AuditLog.id.desc()).limit(min(max(limit, 1), 1000))
     return [{"id": a.id, "tenant_id": a.tenant_id, "actor": a.actor, "action": a.action, "target": a.target,
              "detail": a.detail, "ip": a.ip, "created_at": a.created_at} for a in db.scalars(stmt)]
+
+
+@router.get("/admin/request-info")
+def request_info(request: Request, p: Principal = Depends(require_role("superadmin"))):
+    """Ops diagnostic: how the client address is resolved behind the hosting proxy."""
+    names = ("x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-forwarded-proto")
+    return {"resolved_client_ip": client_ip(request), "peer": request.client.host if request.client else None,
+            "headers": {n: request.headers.get(n) for n in names}}
