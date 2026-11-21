@@ -9,6 +9,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from pymodbus.client import AsyncModbusTcpClient
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./eumbms.db")
+if DATABASE_URL.startswith("postgres://"): DATABASE_URL="postgresql+psycopg://"+DATABASE_URL[len("postgres://"):]
+if DATABASE_URL.startswith("postgresql://"): DATABASE_URL="postgresql+psycopg://"+DATABASE_URL[len("postgresql://"):]
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread":False} if DATABASE_URL.startswith("sqlite") else {}, pool_pre_ping=True)
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
