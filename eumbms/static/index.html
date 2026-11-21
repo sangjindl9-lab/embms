@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EUM BMS PRO · 이음BMS</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<section id="login-view" class="login" hidden>
+  <form id="login-form" class="login-card">
+    <div class="brand"><span class="mark">EUM</span> BMS PRO</div>
+    <p class="muted">이음BMS 통합 전력관제 · 원격검침 플랫폼</p>
+    <label>아이디<input name="username" autocomplete="username" required maxlength="100"></label>
+    <label>비밀번호<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+    <button type="submit">로그인</button>
+    <p id="login-error" class="error" role="alert"></p>
+  </form>
+</section>
+
+<div id="app-view" hidden>
+  <header class="top">
+    <div class="brand"><span class="mark">EUM</span> BMS PRO</div>
+    <nav id="nav">
+      <button data-view="overview" class="active">개요</button>
+      <button data-view="sites">사업장</button>
+      <button data-view="devices">장치·태그</button>
+      <button data-view="gateways">게이트웨이</button>
+      <button data-view="users" data-min-role="tenant_admin">사용자</button>
+      <button data-view="audit" data-min-role="tenant_admin">감사로그</button>
+    </nav>
+    <div class="who"><select id="tenant-select" hidden></select><span id="whoami"></span><button id="logout" class="ghost">로그아웃</button></div>
+  </header>
+  <main>
+    <div class="banner">원격제어 비활성 · 현장 수집은 보안 게이트웨이를 통해서만 수행됩니다</div>
+
+    <section data-panel="overview">
+      <div class="kpis">
+        <div class="kpi"><span>사업장</span><strong id="k-sites">–</strong></div>
+        <div class="kpi"><span>장치</span><strong id="k-devices">–</strong></div>
+        <div class="kpi"><span>태그</span><strong id="k-tags">–</strong></div>
+        <div class="kpi"><span>통신 정상 태그</span><strong id="k-good">–</strong></div>
+        <div class="kpi"><span>게이트웨이</span><strong id="k-gw">–</strong></div>
+      </div>
+      <h2>실시간 태그</h2>
+      <table><thead><tr><th>태그</th><th>장치</th><th>값</th><th>단위</th><th>품질</th><th>측정시각</th></tr></thead><tbody id="t-live"></tbody></table>
+    </section>
+
+    <section data-panel="sites" hidden>
+      <h2>사업장</h2>
+      <form id="f-site" class="row" data-min-role="operator"><input name="name" placeholder="사업장 이름" required maxlength="200"><input name="address" placeholder="주소" maxlength="300"><button>추가</button></form>
+      <table><thead><tr><th>ID</th><th>이름</th><th>주소</th></tr></thead><tbody id="t-sites"></tbody></table>
+    </section>
+
+    <section data-panel="devices" hidden>
+      <h2>장치 (Modbus TCP/RTU)</h2>
+      <form id="f-device" class="row" data-min-role="operator">
+        <select name="site_id" class="sel-sites" required></select>
+        <select name="gateway_id" class="sel-gateways"><option value="">게이트웨이 없음</option></select>
+        <input name="name" placeholder="장치명" required maxlength="200">
+        <select name="protocol"><option value="modbus_tcp">Modbus TCP</option><option value="modbus_rtu">Modbus RTU</option></select>
+        <input name="host" placeholder="사설 IP (TCP)">
+        <input name="port" type="number" value="502" min="1" max="65535">
+        <input name="unit_id" type="number" value="1" min="0" max="247" title="Unit ID">
+        <input name="serial_port" placeholder="시리얼 포트 (RTU)">
+        <button>등록</button>
+      </form>
+      <table><thead><tr><th>ID</th><th>장치</th><th>프로토콜</th><th>주소</th><th>게이트웨이</th><th>수집</th></tr></thead><tbody id="t-devices"></tbody></table>
+      <h2>태그</h2>
+      <form id="f-tag" class="row" data-min-role="operator">
+        <select name="device_id" class="sel-devices" required></select>
+        <input name="name" placeholder="태그명" required maxlength="200">
+        <select name="function_code"><option value="3">FC3 Holding</option><option value="4">FC4 Input</option><option value="1">FC1 Coil</option><option value="2">FC2 Discrete</option></select>
+        <input name="address" type="number" min="0" max="65535" placeholder="0-based 주소" required>
+        <select name="data_type"><option>uint16</option><option>int16</option><option>uint32</option><option>int32</option><option>float32</option><option>uint64</option><option>int64</option><option>float64</option><option>bool</option></select>
+        <select name="word_order"><option value="big">워드 Big</option><option value="little">워드 Little</option></select>
+        <select name="byte_order"><option value="big">바이트 Big</option><option value="little">바이트 Little</option></select>
+        <input name="scale" type="number" step="any" value="1" title="배율">
+        <input name="offset" type="number" step="any" value="0" title="오프셋">
+        <input name="unit" placeholder="단위" maxlength="20">
+        <button>등록</button>
+      </form>
+      <table><thead><tr><th>ID</th><th>태그</th><th>FC</th><th>주소</th><th>형식</th><th>값</th><th>품질</th></tr></thead><tbody id="t-tags"></tbody></table>
+    </section>
+
+    <section data-panel="gateways" hidden>
+      <h2>엣지 게이트웨이</h2>
+      <p class="muted">게이트웨이는 현장망 안에서 장치를 읽고, 중앙 서버로 아웃바운드 HTTPS 연결만 합니다.</p>
+      <form id="f-gateway" class="row" data-min-role="tenant_admin"><select name="site_id" class="sel-sites" required></select><input name="name" placeholder="게이트웨이 이름" required maxlength="200"><button>등록 (토큰 발급)</button></form>
+      <pre id="gw-token" class="token" hidden></pre>
+      <table><thead><tr><th>ID</th><th>이름</th><th>사업장</th><th>최근 접속</th><th>에이전트</th></tr></thead><tbody id="t-gateways"></tbody></table>
+    </section>
+
+    <section data-panel="users" hidden>
+      <h2>사용자</h2>
+      <form id="f-user" class="row"><input name="username" placeholder="아이디" required minlength="3" maxlength="100"><input name="password" type="password" placeholder="비밀번호 (12자 이상)" required minlength="12" autocomplete="new-password"><select name="role"><option value="viewer">조회자</option><option value="operator">운영자</option><option value="tenant_admin">고객사 관리자</option></select><button>추가</button></form>
+      <table><thead><tr><th>ID</th><th>아이디</th><th>권한</th><th>고객사</th><th>상태</th><th>최근 로그인</th></tr></thead><tbody id="t-users"></tbody></table>
+      <div data-super-only hidden>
+        <h2>고객사(테넌트)</h2>
+        <form id="f-tenant" class="row"><input name="name" placeholder="고객사 이름" required maxlength="200"><button>추가</button></form>
+        <table><thead><tr><th>ID</th><th>고객사</th></tr></thead><tbody id="t-tenants"></tbody></table>
+      </div>
+    </section>
+
+    <section data-panel="audit" hidden>
+      <h2>감사로그</h2>
+      <table><thead><tr><th>시각</th><th>사용자</th><th>동작</th><th>대상</th><th>IP</th></tr></thead><tbody id="t-audit"></tbody></table>
+    </section>
+    <p id="toast" class="toast" role="status" hidden></p>
+  </main>
+</div>
+</body>
+</html>

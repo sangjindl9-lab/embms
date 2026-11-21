@@ -1,11 +1,14 @@
+# Local development only. Credentials below are throwaway dev values — never reuse in production.
 services:
   web:
     build: .
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg://eumbms:eumbms@db:5432/eumbms
-      ENABLE_POLLING: "false"
+      DATABASE_URL: postgresql+psycopg://eumbms:eumbms-dev-only@db:5432/eumbms
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD (20+ chars) in your shell}
+      COOKIE_SECURE: "false"
     depends_on:
       db:
         condition: service_healthy
@@ -14,7 +17,7 @@ services:
     environment:
       POSTGRES_DB: eumbms
       POSTGRES_USER: eumbms
-      POSTGRES_PASSWORD: eumbms
+      POSTGRES_PASSWORD: eumbms-dev-only
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

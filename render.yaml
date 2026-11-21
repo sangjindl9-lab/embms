@@ -1,9 +1,17 @@
+# EUM BMS PRO — Render Blueprint
+# - Web: free plan only (approved scope).
+# - Database: the separately created paid Postgres "eumbms-db" (0.1c-256mb, Singapore) is
+#   REFERENCED, never declared here, so this Blueprint cannot create or change any database.
+# - Secrets: ADMIN_PASSWORD is entered at approval time / in the Render dashboard (sync: false),
+#   DATABASE_URL comes from the existing database. Nothing secret is committed.
 services:
   - type: web
     name: eumbms-web
     runtime: docker
     plan: free
     region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
@@ -14,12 +22,8 @@ services:
       - key: ADMIN_USER
         value: admin
       - key: ADMIN_PASSWORD
-        generateValue: true
-      - key: ENABLE_POLLING
-        value: "false"
-databases:
-  - name: eumbms-db
-    plan: free
-    region: singapore
-    databaseName: eumbms
-    user: eumbms
+        sync: false
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "true"

@@ -1,27 +1,67 @@
 # EUM BMS PRO — 이음BMS
 
-Initial development build (v0.1.0). Not production-ready.
+BMS · Power SCADA · EMS · 원격검침 통합 플랫폼. **개발 버전 v0.3.0 — 상용 운영 전 단계.**
 
-## Run
+## 구조
 
-```bash
-docker compose up --build
+```
+eumbms/            중앙 서버 (FastAPI)
+  main.py          앱, 보안 헤더(CSP: unsafe-inline 없음), /health
+  models.py        고객사(테넌트)·사용자·세션·감사로그·사업장·건물·게이트웨이·장치·태그·측정값
+  deps.py          세션 인증, RBAC, 테넌트 격리 헬퍼
+  routers/         auth · admin(테넌트/사용자/감사) · assets(사업장/건물/장치/태그) · gateways
+  static/          UI (JS/CSS 분리)
+migrations/        Alembic 마이그레이션 (앱 시작 시 upgrade head)
+gateway/           현장 엣지 게이트웨이 에이전트 (별도 배포, 현장망 내부)
+tests/             pytest — 인증·RBAC·테넌트 격리·로그인 제한·게이트웨이·Modbus 시뮬레이터
 ```
 
-Open http://localhost:8000 and http://localhost:8000/docs.
+## 보안 모델
 
-## Implemented
-- Site, Modbus TCP device and holding-register tag CRUD (create/list)
-- PostgreSQL persistence (SQLite fallback for local development)
-- Read-only Modbus TCP polling code, disabled by default
-- Quality flags and reading persistence
-- Basic Korean web dashboard
+- 계정: scrypt 비밀번호 해시, 세션 토큰(DB에는 SHA-256 해시만 저장), 12시간 만료
+- 브라우저: HttpOnly·Secure·SameSite=Strict 쿠키 + CSRF 토큰 헤더 / API: `Authorization: Bearer`
+- 권한: `superadmin`(플랫폼) > `tenant_admin` > `operator` > `viewer`
+- 테넌트 격리: 모든 데이터에 `tenant_id`, 타 고객사 객체는 404로 응답(존재 여부 비노출)
+- 로그인 제한: DB 기반(다중 인스턴스/재시작 공유) — 계정당 10회/5분, IP당 50회/5분
+- 프록시 IP: `TRUSTED_PROXY_HOPS`만큼 X-Forwarded-For 오른쪽에서 선택(왼쪽 값은 위조 가능)
+- 감사로그: 로그인/실패/로그아웃, 생성·수정·삭제, 토큰 재발급
+- 최초 관리자: DB에 superadmin이 없을 때만 `ADMIN_USER`/`ADMIN_PASSWORD`(20자 이상)로 생성. 기존 계정은 덮어쓰지 않음
 
-## NOT implemented / safety limitations
-- Authentication, tenant isolation, TLS, secrets management, migrations, gateway, high availability, audit logs
-- Production-grade Modbus compatibility validation and hardware-in-the-loop tests
-- BACnet, OPC UA, other manufacturer drivers, remote metering and tariffs, diagrams, alarms
-- Remote control is intentionally absent
-- Polling must remain disabled on public servers. Enable only in isolated, authorized test networks after authentication and network access controls are implemented.
+## 현장 수집 구조 (P2)
 
-Do not expose this prototype publicly or connect it to operational power infrastructure.
+중앙 서버는 PLC/RTU에 **절대 직접 접속하지 않습니다.** 현장 게이트웨이가 현장망에서 장치를 읽고(읽기 전용 FC1–4),
+로컬 SQLite 버퍼에 저장한 뒤 **아웃바운드 HTTPS**로 `/api/gw/readings`에 업로드합니다.
+
+```bash
+pip install -r gateway/requirements.txt
+EUM_SERVER_URL=https://<서버> EUM_GATEWAY_TOKEN=gw_... EUM_ALLOWED_NETWORKS=192.168.10.0/24 python gateway/agent.py
+```
+
+- 허용 네트워크(`EUM_ALLOWED_NETWORKS`) 밖 주소는 접속하지 않음 — SSRF/사설망 정책은 게이트웨이에서 관리
+- 데이터 타입: bool, (u)int16/32/64, float32/64 · 워드/바이트 순서(ABCD/CDAB/BADC/DCBA) · 배율·오프셋
+- WAN 장애 시 로컬 버퍼 유지, 지수 백오프 재전송, 서버측 (tag, ts) 중복 제거
+- pymodbus 3.8(`slave=`)·3.10+(`device_id=`) 인수 차이를 런타임 감지
+
+## 원격제어
+
+**비활성.** 쓰기(FC5/6/15/16) 경로가 코드에 없습니다. P6(이중 승인·인터록·실장비 시험) 완료 전까지 구현하지 않습니다.
+
+## 실행
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q                                   # SQLite
+TEST_DATABASE_URL=postgresql+psycopg://... pytest -q   # PostgreSQL
+ADMIN_PASSWORD='20자-이상-개발용-비밀번호' docker compose up --build
+```
+
+## Render 배포
+
+`render.yaml`은 무료 웹 서비스 `eumbms-web`만 선언하고, 별도로 만든 유료 DB `eumbms-db`를 **참조만** 합니다
+(DB를 생성·변경하지 않음). `ADMIN_PASSWORD`는 Render 대시보드 환경변수에만 둡니다.
+
+## 미구현 (로드맵)
+
+P3 프로토콜 센터(제조사·모델·드라이버·공식문서 출처·롤백), BACnet/OPC UA 등 추가 프로토콜,
+P4 SCADA 단선결선도·경보·트렌드·보고서, P5 원격검침·요금, P6 제한적 원격제어, P7 부하·복구·백업·운영 문서.
+실장비 호환성 검증은 아직 없음(시뮬레이터 검증만 완료).
