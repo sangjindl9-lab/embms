@@ -1,0 +1,25 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://eumbms:eumbms@db:5432/eumbms
+      ENABLE_POLLING: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: eumbms
+      POSTGRES_USER: eumbms
+      POSTGRES_PASSWORD: eumbms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eumbms"]
+      interval: 5s
+      retries: 10
+volumes:
+  pgdata:
