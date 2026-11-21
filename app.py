@@ -1,6 +1,7 @@
-import os, asyncio, datetime
+import os, asyncio, datetime, secrets, base64, ipaddress, socket, logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, select
@@ -85,13 +86,36 @@ async def lifespan(app):
         try: await task
         except asyncio.CancelledError: pass
 
-app=FastAPI(title="EUM BMS PRO",version="0.1.0",lifespan=lifespan)
+app=FastAPI(title="EUM BMS PRO",version="0.2.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ADMIN_USER=os.getenv("ADMIN_USER","")
+ADMIN_PASSWORD=os.getenv("ADMIN_PASSWORD","")
+if not ADMIN_USER or len(ADMIN_PASSWORD)<20:
+    raise RuntimeError("ADMIN_USER and ADMIN_PASSWORD (minimum 20 characters) must be configured")
+@app.middleware("http")
+async def require_auth(request:Request, call_next):
+    if request.url.path == "/health":
+        return await call_next(request)
+    auth=request.headers.get("authorization","")
+    try:
+        if not auth.startswith("Basic "): raise ValueError()
+        user,pwd=base64.b64decode(auth[6:],validate=True).decode("utf-8").split(":",1)
+        if not (secrets.compare_digest(user,ADMIN_USER) and secrets.compare_digest(pwd,ADMIN_PASSWORD)):raise ValueError()
+    except (ValueError,UnicodeError):
+        return JSONResponse({"detail":"Authentication required"},status_code=401,headers={"WWW-Authenticate":'Basic realm="EUM BMS PRO"',"Cache-Control":"no-store"})
+    response=await call_next(request)
+    response.headers["Cache-Control"]="no-store"
+    response.headers["X-Content-Type-Options"]="nosniff"
+    response.headers["X-Frame-Options"]="DENY"
+    response.headers["Referrer-Policy"]="no-referrer"
+    response.headers["Content-Security-Policy"]="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    return response
+
 class SiteIn(BaseModel):
     name:str=Field(min_length=1,max_length=200)
 class DeviceIn(BaseModel):
     site_id:int
     name:str
-    host:str
+    host:str=Field(min_length=1,max_length=255)
     port:int=Field(default=502,ge=1,le=65535)
     unit_id:int=Field(default=1,ge=0,le=247)
 class TagIn(BaseModel):
@@ -101,7 +125,7 @@ class TagIn(BaseModel):
     scale:float=1.0
 
 @app.get("/health")
-def health(): return {"status":"ok","version":"0.1.0"}
+def health(): return {"status":"ok","version":"0.2.0"}
 @app.get("/api/sites")
 def sites():
     with Session() as db: return [{"id":s.id,"name":s.name} for s in db.scalars(select(Site)).all()]
@@ -118,6 +142,11 @@ def devices():
 def create_device(data:DeviceIn):
     with Session() as db:
         if not db.get(Site,data.site_id):raise HTTPException(404,"Site not found")
+        try:
+            ip=ipaddress.ip_address(data.host)
+            if not ip.is_private: raise ValueError()
+        except ValueError:
+            raise HTTPException(400,"Only private IP addresses are permitted for field devices")
         obj=Device(**data.model_dump());db.add(obj);db.commit();db.refresh(obj)
         return {"id":obj.id,"name":obj.name,"enabled":False}
 @app.get("/api/tags")
