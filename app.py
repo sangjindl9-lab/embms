@@ -1,4 +1,5 @@
-import os, asyncio, datetime, secrets, base64, ipaddress, socket, logging
+import os, asyncio, datetime, secrets, base64, ipaddress, socket, logging, time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -89,6 +90,7 @@ async def lifespan(app):
         except asyncio.CancelledError: pass
 
 app=FastAPI(title="EUM BMS PRO",version="0.2.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+AUTH_ATTEMPTS=defaultdict(deque)
 ADMIN_USER=os.getenv("ADMIN_USER","")
 ADMIN_PASSWORD=os.getenv("ADMIN_PASSWORD","")
 if not ADMIN_USER or len(ADMIN_PASSWORD)<20:
@@ -97,13 +99,21 @@ if not ADMIN_USER or len(ADMIN_PASSWORD)<20:
 async def require_auth(request:Request, call_next):
     if request.url.path == "/health":
         return await call_next(request)
+    client_ip=request.client.host if request.client else "unknown"
+    now=time.monotonic()
+    attempts=AUTH_ATTEMPTS[client_ip]
+    while attempts and now-attempts[0]>300: attempts.popleft()
+    if len(attempts)>=10:
+        return JSONResponse({"detail":"Too many authentication attempts"},status_code=429,headers={"Retry-After":"300"})
     auth=request.headers.get("authorization","")
     try:
         if not auth.startswith("Basic "): raise ValueError()
         user,pwd=base64.b64decode(auth[6:],validate=True).decode("utf-8").split(":",1)
         if not (secrets.compare_digest(user,ADMIN_USER) and secrets.compare_digest(pwd,ADMIN_PASSWORD)):raise ValueError()
     except (ValueError,UnicodeError):
+        attempts.append(now)
         return JSONResponse({"detail":"Authentication required"},status_code=401,headers={"WWW-Authenticate":'Basic realm="EUM BMS PRO"',"Cache-Control":"no-store"})
+    attempts.clear()
     response=await call_next(request)
     response.headers["Cache-Control"]="no-store"
     response.headers["X-Content-Type-Options"]="nosniff"
@@ -124,7 +134,7 @@ class TagIn(BaseModel):
     device_id:int
     name:str
     address:int=Field(ge=0,le=65535)
-    scale:float=1.0
+    scale:float=Field(default=1.0,ge=-1000000,le=1000000)
 
 @app.get("/health")
 def health(): return {"status":"ok","version":"0.2.0"}
