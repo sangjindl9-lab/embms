@@ -7,7 +7,8 @@ central server. The central server never connects to field devices.
 Environment:
   EUM_SERVER_URL        https://<central-server>      (https required unless EUM_ALLOW_INSECURE=1 for local tests)
   EUM_GATEWAY_TOKEN     token issued by the server (one-time display)
-  EUM_ALLOWED_NETWORKS  comma-separated CIDRs the gateway may poll, e.g. 192.168.10.0/24
+  EUM_ALLOWED_NETWORKS  comma-separated CIDRs the gateway may poll over TCP, e.g. 192.168.10.0/24
+                        (not needed for serial Modbus RTU devices)
   EUM_BUFFER_PATH       local buffer file (default ./gateway_buffer.db)
   EUM_CONFIG_REFRESH_S  config refresh period (default 60)
 """
@@ -194,7 +195,7 @@ def main():
         raise SystemExit("EUM_SERVER_URL must use https://")
     networks = parse_networks(os.getenv("EUM_ALLOWED_NETWORKS", ""))
     if not networks:
-        raise SystemExit("EUM_ALLOWED_NETWORKS is required (e.g. 192.168.10.0/24)")
+        log.warning("EUM_ALLOWED_NETWORKS not set: Modbus TCP devices are blocked; serial (RTU) devices still work")
     agent = Agent(server, os.environ["EUM_GATEWAY_TOKEN"], networks,
                   Buffer(os.getenv("EUM_BUFFER_PATH", "gateway_buffer.db")),
                   config_refresh_s=int(os.getenv("EUM_CONFIG_REFRESH_S", "60")))

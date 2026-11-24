@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EUM BMS PRO · 이음BMS</title>
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/charts.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -23,54 +24,119 @@
   <header class="top">
     <div class="brand"><span class="mark">EUM</span> BMS PRO</div>
     <nav id="nav">
-      <button data-view="overview" class="active">개요</button>
-      <button data-view="sites">사업장</button>
+      <button data-view="overview" class="active">관제</button>
+      <button data-view="diagram">단선결선도</button>
+      <button data-view="trend">트렌드</button>
+      <button data-view="alarms">경보 <span id="alarm-badge" class="badge" hidden></span></button>
       <button data-view="devices">장치·태그</button>
-      <button data-view="gateways">게이트웨이</button>
+      <button data-view="sites">사업장·게이트웨이</button>
       <button data-view="users" data-min-role="tenant_admin">사용자</button>
       <button data-view="audit" data-min-role="tenant_admin">감사로그</button>
     </nav>
-    <div class="who"><select id="tenant-select" hidden></select><span id="whoami"></span><button id="logout" class="ghost">로그아웃</button></div>
+    <div class="who"><select id="tenant-select" hidden aria-label="고객사"></select><span id="whoami"></span><button id="logout" class="ghost">로그아웃</button></div>
   </header>
   <main>
-    <div class="banner">원격제어 비활성 · 현장 수집은 보안 게이트웨이를 통해서만 수행됩니다</div>
+    <div class="banner">원격제어 비활성 · 현장 수집은 보안 게이트웨이를 통해서만 수행됩니다 <span id="clock" class="muted"></span></div>
 
+    <!-- 관제 -->
     <section data-panel="overview">
       <div class="kpis">
-        <div class="kpi"><span>사업장</span><strong id="k-sites">–</strong></div>
-        <div class="kpi"><span>장치</span><strong id="k-devices">–</strong></div>
-        <div class="kpi"><span>태그</span><strong id="k-tags">–</strong></div>
-        <div class="kpi"><span>통신 정상 태그</span><strong id="k-good">–</strong></div>
-        <div class="kpi"><span>게이트웨이</span><strong id="k-gw">–</strong></div>
+        <div class="kpi"><span>현재 전력</span><strong id="k-power">–</strong><small>kW</small></div>
+        <div class="kpi"><span>금일 사용량</span><strong id="k-today">–</strong><small>kWh</small></div>
+        <div class="kpi"><span>금일 최대전력</span><strong id="k-peak">–</strong><small>kW</small></div>
+        <div class="kpi"><span>장치 통신</span><strong id="k-online">–</strong><small id="k-online-sub"></small></div>
+        <div class="kpi" id="kpi-alarm"><span>활성 경보</span><strong id="k-alarms">–</strong><small id="k-unack"></small></div>
       </div>
-      <h2>실시간 태그</h2>
-      <table><thead><tr><th>태그</th><th>장치</th><th>값</th><th>단위</th><th>품질</th><th>측정시각</th></tr></thead><tbody id="t-live"></tbody></table>
+      <div class="cols">
+        <div>
+          <h2>사업장 현황</h2>
+          <div id="site-cards" class="site-cards"></div>
+          <div id="empty-hint" class="hint" hidden>
+            <p>아직 데이터가 없습니다. 실제 장비 없이 화면을 시험하려면 가상 수변전실을 만들어 보세요.</p>
+            <button id="btn-demo" data-min-role="tenant_admin">가상 수변전실 만들기</button>
+          </div>
+        </div>
+        <div>
+          <h2>최근 경보</h2>
+          <ul id="recent-alarms" class="alarm-list"></ul>
+        </div>
+      </div>
+      <h2>실시간 값</h2>
+      <div class="filter-row"><select id="live-site"><option value="">전체 사업장</option></select></div>
+      <div id="live-groups" class="live-groups"></div>
     </section>
 
-    <section data-panel="sites" hidden>
-      <h2>사업장</h2>
-      <form id="f-site" class="row" data-min-role="operator"><input name="name" placeholder="사업장 이름" required maxlength="200"><input name="address" placeholder="주소" maxlength="300"><button>추가</button></form>
-      <table><thead><tr><th>ID</th><th>이름</th><th>주소</th></tr></thead><tbody id="t-sites"></tbody></table>
+    <!-- 결선도 -->
+    <section data-panel="diagram" hidden>
+      <div class="filter-row">
+        <select id="dg-site" aria-label="사업장"></select>
+        <button id="dg-edit" class="ghost" data-min-role="operator">편집</button>
+      </div>
+      <div id="dg-view" class="diagram"></div>
+      <div id="dg-editor" hidden>
+        <p class="muted">요소: bus · breaker · transformer · meter · load · generator · label. tag_id는 값 표시, state_tag_id는 차단기 상태(1=투입, 0=개방)입니다.</p>
+        <textarea id="dg-json" rows="18" spellcheck="false"></textarea>
+        <div class="row"><button id="dg-save">저장</button><button id="dg-cancel" class="ghost">취소</button><button id="dg-tags" class="ghost">태그 ID 목록 보기</button></div>
+        <pre id="dg-taglist" class="token" hidden></pre>
+      </div>
     </section>
 
+    <!-- 트렌드 -->
+    <section data-panel="trend" hidden>
+      <div class="filter-row">
+        <select id="tr-tags" multiple size="6" aria-label="태그 (최대 4개)"></select>
+        <div class="stack">
+          <select id="tr-hours"><option value="1">최근 1시간</option><option value="6">6시간</option><option value="24" selected>24시간</option><option value="168">7일</option><option value="720">30일</option></select>
+          <button id="tr-load">조회</button>
+          <button id="tr-csv" class="ghost">CSV 저장 (첫 태그)</button>
+          <small class="muted">Ctrl/⌘ 또는 길게 눌러 여러 개 선택 (최대 4개)</small>
+        </div>
+      </div>
+      <div id="tr-chart" class="chart"></div>
+      <p id="tr-info" class="muted"></p>
+    </section>
+
+    <!-- 경보 -->
+    <section data-panel="alarms" hidden>
+      <div class="filter-row"><select id="al-state"><option value="active">활성 경보</option><option value="all">전체 이력</option></select></div>
+      <table><thead><tr><th>등급</th><th>발생</th><th>내용</th><th>값</th><th>해제</th><th>확인</th></tr></thead><tbody id="t-alarms"></tbody></table>
+      <h2>경보 설정</h2>
+      <form id="f-rule" class="row" data-min-role="operator">
+        <select name="tag_id" class="sel-tags" required></select>
+        <select name="kind"><option value="high">상한</option><option value="low">하한</option><option value="state">상태값 일치</option><option value="comm">통신 두절</option></select>
+        <input name="threshold" type="number" step="any" placeholder="기준값" value="0">
+        <input name="deadband" type="number" step="any" min="0" placeholder="불감대" value="0" title="해제 여유폭">
+        <select name="severity"><option value="minor">경</option><option value="major" selected>중</option><option value="critical">중대</option><option value="info">정보</option></select>
+        <input name="message" placeholder="경보 문구 (선택)" maxlength="200">
+        <button>추가</button>
+      </form>
+      <table><thead><tr><th>태그</th><th>종류</th><th>기준</th><th>불감대</th><th>등급</th><th>문구</th><th></th></tr></thead><tbody id="t-rules"></tbody></table>
+    </section>
+
+    <!-- 장치·태그 -->
     <section data-panel="devices" hidden>
-      <h2>장치 (Modbus TCP/RTU)</h2>
+      <h2>장치</h2>
       <form id="f-device" class="row" data-min-role="operator">
         <select name="site_id" class="sel-sites" required></select>
-        <select name="gateway_id" class="sel-gateways"><option value="">게이트웨이 없음</option></select>
+        <select name="template" id="dev-template"><option value="">템플릿 없음</option></select>
+        <select name="protocol" id="dev-protocol"><option value="modbus_tcp">Modbus TCP</option><option value="modbus_rtu">Modbus RTU</option><option value="simulator">가상 장치</option></select>
         <input name="name" placeholder="장치명" required maxlength="200">
-        <select name="protocol"><option value="modbus_tcp">Modbus TCP</option><option value="modbus_rtu">Modbus RTU</option></select>
+        <select name="gateway_id" class="sel-gateways"><option value="">게이트웨이 없음</option></select>
         <input name="host" placeholder="사설 IP (TCP)">
-        <input name="port" type="number" value="502" min="1" max="65535">
-        <input name="unit_id" type="number" value="1" min="0" max="247" title="Unit ID">
-        <input name="serial_port" placeholder="시리얼 포트 (RTU)">
+        <input name="port" type="number" value="502" min="1" max="65535" title="포트">
+        <input name="serial_port" placeholder="시리얼 포트 (예: COM3, /dev/ttyUSB0)">
+        <input name="baudrate" type="number" value="9600" title="통신속도">
+        <input name="unit_id" type="number" value="1" min="0" max="247" title="국번(Unit ID)">
+        <input name="poll_interval_s" type="number" value="10" min="1" max="3600" title="수집 주기(초)">
         <button>등록</button>
       </form>
-      <table><thead><tr><th>ID</th><th>장치</th><th>프로토콜</th><th>주소</th><th>게이트웨이</th><th>수집</th></tr></thead><tbody id="t-devices"></tbody></table>
+      <p id="tpl-note" class="muted"></p>
+      <table><thead><tr><th>ID</th><th>장치</th><th>방식</th><th>주소</th><th>게이트웨이</th><th>통신</th><th>수집</th></tr></thead><tbody id="t-devices"></tbody></table>
       <h2>태그</h2>
       <form id="f-tag" class="row" data-min-role="operator">
         <select name="device_id" class="sel-devices" required></select>
         <input name="name" placeholder="태그명" required maxlength="200">
+        <select name="category"><option value="power">전력</option><option value="energy">전력량</option><option value="voltage">전압</option><option value="current">전류</option><option value="pf">역률</option><option value="frequency">주파수</option><option value="temperature">온도</option><option value="state">상태</option><option value="other" selected>기타</option></select>
         <select name="function_code"><option value="3">FC3 Holding</option><option value="4">FC4 Input</option><option value="1">FC1 Coil</option><option value="2">FC2 Discrete</option></select>
         <input name="address" type="number" min="0" max="65535" placeholder="0-based 주소" required>
         <select name="data_type"><option>uint16</option><option>int16</option><option>uint32</option><option>int32</option><option>float32</option><option>uint64</option><option>int64</option><option>float64</option><option>bool</option></select>
@@ -81,17 +147,22 @@
         <input name="unit" placeholder="단위" maxlength="20">
         <button>등록</button>
       </form>
-      <table><thead><tr><th>ID</th><th>태그</th><th>FC</th><th>주소</th><th>형식</th><th>값</th><th>품질</th></tr></thead><tbody id="t-tags"></tbody></table>
+      <table><thead><tr><th>ID</th><th>태그</th><th>장치</th><th>FC/주소</th><th>형식</th><th>값</th><th>품질</th><th>측정시각</th></tr></thead><tbody id="t-tags"></tbody></table>
     </section>
 
-    <section data-panel="gateways" hidden>
+    <!-- 사업장·게이트웨이 -->
+    <section data-panel="sites" hidden>
+      <h2>사업장</h2>
+      <form id="f-site" class="row" data-min-role="operator"><input name="name" placeholder="사업장 이름" required maxlength="200"><input name="address" placeholder="주소" maxlength="300"><button>추가</button></form>
+      <table><thead><tr><th>ID</th><th>이름</th><th>주소</th></tr></thead><tbody id="t-sites"></tbody></table>
       <h2>엣지 게이트웨이</h2>
-      <p class="muted">게이트웨이는 현장망 안에서 장치를 읽고, 중앙 서버로 아웃바운드 HTTPS 연결만 합니다.</p>
+      <p class="muted">게이트웨이는 현장망 안의 PC·라즈베리파이에서 장치를 읽고, 서버로 아웃바운드 HTTPS 연결만 합니다.</p>
       <form id="f-gateway" class="row" data-min-role="tenant_admin"><select name="site_id" class="sel-sites" required></select><input name="name" placeholder="게이트웨이 이름" required maxlength="200"><button>등록 (토큰 발급)</button></form>
       <pre id="gw-token" class="token" hidden></pre>
       <table><thead><tr><th>ID</th><th>이름</th><th>사업장</th><th>최근 접속</th><th>에이전트</th></tr></thead><tbody id="t-gateways"></tbody></table>
     </section>
 
+    <!-- 사용자 -->
     <section data-panel="users" hidden>
       <h2>사용자</h2>
       <form id="f-user" class="row"><input name="username" placeholder="아이디" required minlength="3" maxlength="100"><input name="password" type="password" placeholder="비밀번호 (12자 이상)" required minlength="12" autocomplete="new-password"><select name="role"><option value="viewer">조회자</option><option value="operator">운영자</option><option value="tenant_admin">고객사 관리자</option></select><button>추가</button></form>
@@ -107,6 +178,15 @@
       <h2>감사로그</h2>
       <table><thead><tr><th>시각</th><th>사용자</th><th>동작</th><th>대상</th><th>IP</th></tr></thead><tbody id="t-audit"></tbody></table>
     </section>
+
+    <details class="pw">
+      <summary>내 비밀번호 변경</summary>
+      <form id="f-password" class="row">
+        <input name="current_password" type="password" placeholder="현재 비밀번호" required autocomplete="current-password">
+        <input name="new_password" type="password" placeholder="새 비밀번호 (12자 이상)" required minlength="12" autocomplete="new-password">
+        <button>변경</button>
+      </form>
+    </details>
     <p id="toast" class="toast" role="status" hidden></p>
   </main>
 </div>

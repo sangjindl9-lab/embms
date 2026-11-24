@@ -131,6 +131,8 @@ class Tag(Base):
     scale: Mapped[float] = mapped_column(Float, default=1.0)
     offset: Mapped[float] = mapped_column(Float, default=0.0)
     unit: Mapped[str] = mapped_column(String(20), default="")
+    # display category: voltage|current|power|energy|pf|frequency|temperature|state|other
+    category: Mapped[str] = mapped_column(String(20), default="other", server_default="other")
     value: Mapped[float | None] = mapped_column(Float, nullable=True)
     quality: Mapped[str] = mapped_column(String(20), default="Uncertain")
     source_ts: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -147,3 +149,47 @@ class Reading(Base):
     ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (Index("ix_readings_tag_ts", "tag_id", "ts"),)
+
+
+ALARM_KINDS = ("high", "low", "state", "comm")
+SEVERITIES = ("info", "minor", "major", "critical")
+
+
+class AlarmRule(Base):
+    __tablename__ = "alarm_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))          # high | low | state | comm
+    threshold: Mapped[float] = mapped_column(Float, default=0.0)  # limit, or state value that alarms
+    deadband: Mapped[float] = mapped_column(Float, default=0.0)
+    severity: Mapped[str] = mapped_column(String(10), default="major")
+    message: Mapped[str] = mapped_column(String(200), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AlarmEvent(Base):
+    __tablename__ = "alarm_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, index=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("alarm_rules.id", ondelete="CASCADE"), index=True)
+    tag_id: Mapped[int] = mapped_column(Integer, index=True)
+    severity: Mapped[str] = mapped_column(String(10))
+    message: Mapped[str] = mapped_column(String(300))
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    raised_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    cleared_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_by: Mapped[str] = mapped_column(String(100), default="")
+
+
+class Diagram(Base):
+    """Single-line diagram for a site. spec = JSON {elements:[...], lines:[...]}."""
+    __tablename__ = "diagrams"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), unique=True)
+    spec: Mapped[str] = mapped_column(Text, default='{"elements":[],"lines":[]}')
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_by: Mapped[str] = mapped_column(String(100), default="")

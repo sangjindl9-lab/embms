@@ -1,4 +1,7 @@
+import asyncio
+import datetime as dt
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,7 +13,7 @@ from sqlalchemy import select, text
 from . import config
 from .db import SessionLocal, engine
 from .models import User
-from .routers import admin, assets, auth, gateways
+from .routers import admin, assets, auth, gateways, scada
 from .security import hash_password
 
 log = logging.getLogger("eumbms")
@@ -36,10 +39,41 @@ def bootstrap_admin():
         log.warning("bootstrap superadmin '%s' created", user)
 
 
+RETENTION_DAYS = int(os.getenv("READINGS_RETENTION_DAYS", "90"))
+
+
+def background_tick(now=None):
+    """One pass of server-side housekeeping: virtual devices, comm-loss alarms, retention."""
+    from .alarms import check_comm
+    from .models import AlarmEvent, Reading, utcnow
+    from .simulator import run_simulators
+    now = now or utcnow()
+    with SessionLocal() as db:
+        run_simulators(db, now)
+        check_comm(db, now)
+        if now.minute == 0 and now.second < 20:
+            db.query(Reading).filter(Reading.ts < now - dt.timedelta(days=RETENTION_DAYS)).delete()
+            db.query(AlarmEvent).filter(AlarmEvent.active.is_(False),
+                                        AlarmEvent.raised_at < now - dt.timedelta(days=365)).delete()
+        db.commit()
+
+
+async def background_loop():
+    while True:
+        try:
+            await asyncio.to_thread(background_tick)
+        except Exception:
+            log.exception("background tick failed")
+        await asyncio.sleep(15)
+
+
 @asynccontextmanager
 async def lifespan(app):
     bootstrap_admin()
+    task = asyncio.create_task(background_loop()) if os.getenv("BACKGROUND_TASKS", "true") == "true" else None
     yield
+    if task:
+        task.cancel()
 
 
 app = FastAPI(title="EUM BMS PRO", version=config.VERSION, lifespan=lifespan,
@@ -81,7 +115,7 @@ def health():
     return JSONResponse(body, status_code=200 if db_ok else 503)
 
 
-for r in (auth.router, admin.router, assets.router, gateways.router):
+for r in (auth.router, admin.router, assets.router, gateways.router, scada.router):
     app.include_router(r)
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

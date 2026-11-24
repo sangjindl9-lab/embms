@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import config
+from ..alarms import evaluate_value
 from ..audit import audit
 from ..db import get_db
 from ..deps import Principal, client_ip, get_owned, require_role, tenant_filter
@@ -82,7 +83,8 @@ def current_gateway(x_gateway_token: str = Header(default=""), db: Session = Dep
 @router.get("/gw/config")
 def gateway_config(g: Gateway = Depends(current_gateway), db: Session = Depends(get_db)):
     g.last_seen_at = utcnow(); db.commit()
-    devices = db.scalars(select(Device).where(Device.gateway_id == g.id, Device.tenant_id == g.tenant_id)).all()
+    devices = db.scalars(select(Device).where(Device.gateway_id == g.id, Device.tenant_id == g.tenant_id,
+                                             Device.protocol != "simulator")).all()
     out = []
     for d in devices:
         tags = db.scalars(select(Tag).where(Tag.device_id == d.id)).all()
@@ -133,6 +135,7 @@ def gateway_readings(batch: ReadingBatch, g: Gateway = Depends(current_gateway),
         cur = t.source_ts if (t.source_ts is None or t.source_ts.tzinfo) else t.source_ts.replace(tzinfo=dt.timezone.utc)
         if latest and (cur is None or latest.ts >= cur):
             t.value, t.quality, t.source_ts, t.updated_at = latest.value, latest.quality, latest.ts, now
+            evaluate_value(db, t, latest.value, latest.quality)
     g.last_seen_at = now
     if batch.agent_version:
         g.agent_version = batch.agent_version

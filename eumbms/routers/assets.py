@@ -32,12 +32,13 @@ class DeviceIn(BaseModel):
     site_id: int
     gateway_id: int | None = None
     name: str = Field(min_length=1, max_length=200)
-    protocol: str = Field(default="modbus_tcp", pattern="^(modbus_tcp|modbus_rtu)$")
+    protocol: str = Field(default="modbus_tcp", pattern="^(modbus_tcp|modbus_rtu|simulator)$")
     host: str = Field(default="", max_length=255)
     port: int = Field(default=502, ge=1, le=65535)
     unit_id: int = Field(default=1, ge=0, le=247)
     serial_port: str = Field(default="", max_length=100)
     baudrate: int = Field(default=9600, ge=1200, le=115200)
+    template: str | None = Field(default=None, max_length=40)
     poll_interval_s: int = Field(default=10, ge=1, le=3600)
 
     @field_validator("host")
@@ -71,6 +72,7 @@ class TagIn(BaseModel):
     scale: float = Field(default=1.0, ge=-1e6, le=1e6)
     offset: float = Field(default=0.0, ge=-1e9, le=1e9)
     unit: str = Field(default="", max_length=20)
+    category: str = Field(default="other", pattern="^(voltage|current|power|energy|pf|frequency|temperature|state|other)$")
 
     @field_validator("function_code")
     @classmethod
@@ -102,7 +104,7 @@ def _tag(t: Tag):
     return {"id": t.id, "tenant_id": t.tenant_id, "device_id": t.device_id, "name": t.name,
             "function_code": t.function_code, "address": t.address, "data_type": t.data_type,
             "word_order": t.word_order, "byte_order": t.byte_order, "scale": t.scale, "offset": t.offset,
-            "unit": t.unit, "value": t.value, "quality": t.quality, "source_ts": t.source_ts, "updated_at": t.updated_at}
+            "unit": t.unit, "category": t.category, "value": t.value, "quality": t.quality, "source_ts": t.source_ts, "updated_at": t.updated_at}
 
 
 # ---- sites
@@ -180,8 +182,17 @@ def create_device(data: DeviceIn, request: Request, p: Principal = Depends(requi
         raise HTTPException(422, "host is required for modbus_tcp")
     if data.protocol == "modbus_rtu" and not data.serial_port:
         raise HTTPException(422, "serial_port is required for modbus_rtu")
-    d = Device(tenant_id=s.tenant_id, enabled=False, control_enabled=False, **data.model_dump())
+    from ..templates import TEMPLATES, tag_defaults
+    tpl = TEMPLATES.get(data.template) if data.template else None
+    if data.template and not tpl:
+        raise HTTPException(404, "Template not found")
+    if tpl and tpl["protocol"] != data.protocol:
+        raise HTTPException(400, f"이 템플릿은 {tpl['protocol']} 장치용입니다")
+    d = Device(tenant_id=s.tenant_id, enabled=False, control_enabled=False, **data.model_dump(exclude={"template"}))
     db.add(d); db.flush()
+    if tpl:
+        for t in tpl["tags"]:
+            db.add(Tag(tenant_id=d.tenant_id, device_id=d.id, **tag_defaults(t)))
     audit(db, "device.create", actor=p.user, tenant_id=s.tenant_id, target=f"device:{d.id}", detail=data.model_dump(), ip=client_ip(request))
     db.commit()
     return _device(d)

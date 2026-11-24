@@ -8,6 +8,7 @@ os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_t
 os.environ["ADMIN_USER"] = "root"
 os.environ["ADMIN_PASSWORD"] = "test-bootstrap-password-0123456789"
 os.environ["COOKIE_SECURE"] = "false"
+os.environ["BACKGROUND_TASKS"] = "false"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
