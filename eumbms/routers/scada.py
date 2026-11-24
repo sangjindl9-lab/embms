@@ -120,7 +120,8 @@ def trend(tag_ids: str = Query(..., max_length=200), hours: int = 24, points: in
             buckets.setdefault(min(b, points - 1), []).append(v)
         pts = [{"t": (start + dt.timedelta(seconds=(b + 0.5) * width)).isoformat(),
                 "avg": round(sum(v) / len(v), 4), "min": min(v), "max": max(v)} for b, v in sorted(buckets.items())]
-        series.append({"tag_id": t.id, "name": t.name, "unit": t.unit, "category": t.category,
+        dev = db.get(Device, t.device_id)
+        series.append({"tag_id": t.id, "name": f"{dev.name} · {t.name}" if dev else t.name, "unit": t.unit, "category": t.category,
                        "raw_count": len(rows), "points": pts})
     return {"start": start, "end": end, "bucket_seconds": round(width, 1), "series": series}
 
