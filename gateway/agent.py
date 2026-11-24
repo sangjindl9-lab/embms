@@ -29,7 +29,7 @@ try:
 except ImportError:  # executed as a script / packaged exe
     from codec import REGISTER_COUNT, decode, engineering
 
-AGENT_VERSION = "gw-0.2.0"
+AGENT_VERSION = "gw-0.2.1"
 log = logging.getLogger("eum-gateway")
 
 
@@ -260,8 +260,20 @@ async def check_server(settings: dict) -> str:
         return "\n".join(lines)
 
 
+def _utf8_console():
+    """Windows consoles/pipes may use cp949/cp1252; never crash on Korean output."""
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream and (stream.encoding or "").lower().replace("-", "") != "utf8":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
     import argparse
+    _utf8_console()
     ap = argparse.ArgumentParser(prog="EUM-Gateway", description="EUM BMS PRO 현장 게이트웨이")
     ap.add_argument("--ports", action="store_true", help="연결된 COM(시리얼) 포트 목록")
     ap.add_argument("--test", metavar="포트또는IP", help="서버 없이 장비를 한 번 읽어 봄 (예: COM3)")

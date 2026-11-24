@@ -167,3 +167,12 @@ def test_settings_file_and_env_override(tmp_path, monkeypatch):
     monkeypatch.delenv("EUM_GATEWAY_TOKEN")
     assert gw.main(["--config", str(tmp_path / "none.ini")]) == 2
     assert gw.main(["--ports"]) == 0
+
+
+def test_cli_does_not_crash_on_non_utf8_output():
+    """Regression: piping Korean output on Windows (cp1252/cp949) crashed the exe."""
+    import subprocess, sys, os
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "gateway" / "agent.py"), "--ports"],
+                       capture_output=True, env=env)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
