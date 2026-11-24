@@ -54,7 +54,7 @@ EUM_SERVER_URL=https://<서버> EUM_GATEWAY_TOKEN=gw_... EUM_ALLOWED_NETWORKS=19
 
 ## Windows 게이트웨이 패키지
 
-`gateway-v*` 태그를 올리면 GitHub Actions가 Windows exe를 빌드·시험(시뮬레이터로 PZEM-016 프레임 읽기)하고 릴리스에 zip을 올립니다.
+main에 `gateway/` 변경이 올라가면 GitHub Actions가 Windows exe를 빌드·시험(시뮬레이터로 PZEM-016 프레임 읽기)하고 `gateway-v<버전>` 릴리스에 zip을 올립니다 (버전은 agent.py의 AGENT_VERSION).
 다운로드: https://github.com/sangjindl9-lab/embms/releases/latest/download/EUM-Gateway-Windows.zip
 
 - `EUM-Gateway.exe --ports` 포트 찾기 · `--test COM3 --template pzem016` 서버 없이 장비 읽기 · `--check` 서버/토큰 확인

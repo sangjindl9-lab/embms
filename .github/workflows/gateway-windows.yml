@@ -2,7 +2,8 @@ name: gateway-windows
 
 on:
   push:
-    tags: ["gateway-v*"]
+    branches: [main]
+    paths: ["gateway/**", ".github/workflows/gateway-windows.yml"]
   workflow_dispatch:
 
 permissions:
@@ -46,16 +47,25 @@ jobs:
           Copy-Item dist/EUM-Gateway.exe pkg/EUM-Gateway/
           Copy-Item gateway/windows/* pkg/EUM-Gateway/
           Compress-Archive -Path pkg/EUM-Gateway -DestinationPath EUM-Gateway-Windows.zip -Force
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path gateway/agent.py -Pattern 'AGENT_VERSION = "gw-([0-9.]+)"').Matches[0].Groups[1].Value
+          "tag=gateway-v$v" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
         with:
           name: EUM-Gateway-Windows
           path: EUM-Gateway-Windows.zip
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/gateway-v')
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: EUM-Gateway-Windows.zip
-          name: EUM 게이트웨이 ${{ github.ref_name }} (Windows)
+          name: EUM 게이트웨이 ${{ steps.ver.outputs.tag }} (Windows)
           body: |
             현장 PC용 EUM BMS PRO 게이트웨이입니다. 압축을 풀고 `설치안내.txt` 순서대로 진행하세요.
             - 1-포트찾기 / 2-장비시험(서버 없이 PZEM-016·SDM120 읽기) / 3-서버연결확인 / 4-게이트웨이실행 / 5-자동시작등록
