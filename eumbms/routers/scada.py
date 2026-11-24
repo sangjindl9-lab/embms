@@ -23,6 +23,15 @@ KST = dt.timezone(dt.timedelta(hours=9))
 SEV_RANK = {s: i for i, s in enumerate(SEVERITIES)}
 
 
+def _main_tag(tag_id, site_tags, category):
+    """Configured representative tag, else the first tag of that category in the site."""
+    if tag_id:
+        t = next((t for t in site_tags if t.id == tag_id), None)
+        if t:
+            return t
+    return next((t for t in sorted(site_tags, key=lambda x: x.id) if t.category == category), None)
+
+
 def _online(dev: Device, tags: list[Tag], now) -> bool:
     limit = dt.timedelta(seconds=max(3 * dev.poll_interval_s, 120))
     return any(t.quality == "Good" and t.source_ts and now - _aware(t.source_ts) <= limit for t in tags)
@@ -49,25 +58,25 @@ def dashboard(tenant_id: int | None = None, p: Principal = Depends(require_role(
     for s in sites:
         sdevs = [d for d in devices if d.site_id == s.id]
         stags = [t for t in tags if tag_site[t.id] == s.id]
-        power = [t for t in stags if t.category == "power" and t.value is not None]
-        energy_tags = [t for t in stags if t.category == "energy"]
-        today_kwh = 0.0
-        for et in energy_tags:
-            first = db.scalar(select(Reading.value).where(Reading.tag_id == et.id, Reading.ts >= day_start,
+        main_p = _main_tag(s.main_power_tag_id, stags, "power")
+        main_e = _main_tag(s.main_energy_tag_id, stags, "energy")
+        today_kwh = None
+        if main_e:
+            first = db.scalar(select(Reading.value).where(Reading.tag_id == main_e.id, Reading.ts >= day_start,
                                                          Reading.value.is_not(None)).order_by(Reading.ts).limit(1))
-            if first is not None and et.value is not None:
-                today_kwh += max(0.0, et.value - first)
+            if first is not None and main_e.value is not None:
+                today_kwh = max(0.0, main_e.value - first)
         peak = None
-        if power:
-            peak = db.scalar(select(func.max(Reading.value)).where(Reading.tag_id.in_([t.id for t in power]),
-                                                                   Reading.ts >= day_start))
+        if main_p:
+            peak = db.scalar(select(func.max(Reading.value)).where(Reading.tag_id == main_p.id, Reading.ts >= day_start))
         sal = [a for a in alarms if tag_site.get(a.tag_id) == s.id]
         out_sites.append({
             "id": s.id, "name": s.name, "address": s.address,
             "devices_total": len(sdevs), "devices_online": sum(1 for d in sdevs if _online(d, tags_by_dev.get(d.id, []), now)),
             "devices_enabled": sum(1 for d in sdevs if d.enabled),
-            "power_kw": round(sum(t.value for t in power), 2) if power else None,
-            "today_kwh": round(today_kwh, 2) if energy_tags else None,
+            "main_power_tag_id": main_p.id if main_p else None, "main_energy_tag_id": main_e.id if main_e else None,
+            "power_kw": round(main_p.value, 2) if main_p and main_p.value is not None else None,
+            "today_kwh": round(today_kwh, 2) if today_kwh is not None else None,
             "peak_kw_today": round(peak, 2) if peak is not None else None,
             "active_alarms": len(sal),
             "worst_severity": max((a.severity for a in sal), key=lambda x: SEV_RANK.get(x, 0), default=None),
@@ -332,6 +341,9 @@ def create_demo(data: DemoIn, request: Request, p: Principal = Depends(require_r
     _, tr = dev("변압기 TR-1", [("권선온도", "temperature", "°C")])
     _, f1 = dev("분기반 L-1 (동관)", [("전류", "current", "A"), ("유효전력", "power", "kW")])
     _, f2 = dev("분기반 L-2 (공용부)", [("전류", "current", "A"), ("유효전력", "power", "kW")])
+    for tag, share in ((f1["current"], 0.55), (f1["power"], 0.55), (f2["current"], 0.4), (f2["power"], 0.4)):
+        tag.scale = share
+    s.main_power_tag_id, s.main_energy_tag_id = main["power"].id, main["energy"].id
 
     rules = [(main["current"], "high", 160, 5, "major", "주 전류 과부하"), (main["voltage"], "low", 370, 2, "minor", "저전압"),
              (main["voltage"], "high", 400, 2, "minor", "과전압"), (tr["temperature"], "high", 85, 3, "critical", "변압기 과열"),

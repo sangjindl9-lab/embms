@@ -53,6 +53,8 @@ def run_simulators(db: Session, now: dt.datetime | None = None, force: bool = Fa
         _last_run[dev.id] = now
         for tag in db.scalars(select(Tag).where(Tag.device_id == dev.id)):
             v = _value(tag, now, tag.value, min(dt_s, 3600))
+            if tag.category in ("current", "power") and tag.scale not in (None, 0, 1):
+                v = round(v * tag.scale, 2)  # feeder share of the incoming load
             db.add(Reading(tenant_id=tag.tenant_id, tag_id=tag.id, value=v, quality="Good", ts=now))
             tag.value, tag.quality, tag.source_ts, tag.updated_at = v, "Good", now, now
             evaluate_value(db, tag, v, "Good")

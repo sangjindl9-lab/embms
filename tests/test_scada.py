@@ -19,7 +19,13 @@ def test_demo_dashboard_trend_and_isolation(client, tenant_pair):
     d = client.get("/api/dashboard", headers=a["viewer"]).json()
     s = next(x for x in d["sites"] if x["id"] == site_id)
     assert s["devices_total"] == 5 and s["devices_online"] == 5 and s["power_kw"] > 0
-    assert s["today_kwh"] is not None and s["peak_kw_today"] > 0
+    assert s["today_kwh"] is not None and s["today_kwh"] > 0
+    assert s["peak_kw_today"] >= s["power_kw"]  # peak is of the same (main) meter
+    tags_all = {t["id"]: t for t in client.get("/api/tags", headers=a["viewer"]).json()}
+    assert abs(tags_all[s["main_power_tag_id"]]["value"] - s["power_kw"]) < 0.01  # not a sum of feeders
+    feeders = [t for t in tags_all.values() if t["category"] == "power" and t["id"] != s["main_power_tag_id"]
+               and t["device_id"] in {d["id"] for d in client.get("/api/devices", headers=a["viewer"]).json()}]
+    assert all(f["value"] < s["power_kw"] for f in feeders if f["value"] is not None)
     tags = client.get("/api/tags", headers=a["viewer"]).json()
     pw = next(t for t in tags if t["category"] == "power")
     tr = client.get(f"/api/trend?tag_ids={pw['id']}&hours=2&points=60", headers=a["viewer"]).json()
@@ -138,3 +144,16 @@ def test_gateway_config_excludes_simulators(client, tenant_pair):
     client.post("/api/devices", json={"site_id": s["id"], "gateway_id": g["id"], "name": "sim", "protocol": "simulator"}, headers=a["operator"])
     cfg = client.get("/api/gw/config", headers={"X-Gateway-Token": g["token"]}).json()
     assert cfg["devices"] == []
+
+
+def test_site_main_meter_patch(client, tenant_pair):
+    a, b = tenant_pair["a"], tenant_pair["b"]
+    s1 = client.post("/api/sites", json={"name": "대표1"}, headers=a["operator"]).json()
+    s2 = client.post("/api/sites", json={"name": "대표2"}, headers=a["operator"]).json()
+    d2 = client.post("/api/devices", json={"site_id": s2["id"], "name": "m", "protocol": "simulator", "template": "sim_meter"}, headers=a["operator"]).json()
+    t2 = next(t for t in client.get(f"/api/tags?device_id={d2['id']}", headers=a["viewer"]).json() if t["category"] == "power")
+    assert client.patch(f"/api/sites/{s1['id']}", json={"main_power_tag_id": t2["id"]}, headers=a["operator"]).status_code == 400
+    r = client.patch(f"/api/sites/{s2['id']}", json={"main_power_tag_id": t2["id"]}, headers=a["operator"])
+    assert r.status_code == 200 and r.json()["main_power_tag_id"] == t2["id"]
+    assert client.patch(f"/api/sites/{s2['id']}", json={"main_power_tag_id": t2["id"]}, headers=b["operator"]).status_code == 404
+    assert client.patch(f"/api/sites/{s2['id']}", json={"main_power_tag_id": None}, headers=a["viewer"]).status_code == 403

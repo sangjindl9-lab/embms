@@ -191,8 +191,22 @@ function renderDevices() {
   fill("#t-tags", S.tags, [t => [t.id], t => [t.name], t => [devName(t.device_id)], t => [`FC${t.function_code} / ${t.address}`],
     t => [`${t.data_type} ${t.word_order[0].toUpperCase()}${t.byte_order[0].toUpperCase()}`], t => [t.value === null ? "—" : `${niceNum(t.value)} ${t.unit}`], t => [t.quality, "q-" + t.quality], t => [ago(t.source_ts)]]);
 }
+function mainSelect(site, field, category) {
+  const devs = new Set(S.devices.filter(d => d.site_id === site.id).map(d => d.id));
+  const tags = S.tags.filter(t => devs.has(t.device_id) && t.category === category);
+  const sel = el("select", "small");
+  const auto = el("option", "", "자동 (첫 번째)"); auto.value = ""; sel.appendChild(auto);
+  for (const t of tags) { const o = el("option", "", `${devName(t.device_id)} · ${t.name}`); o.value = t.id; sel.appendChild(o); }
+  sel.value = site[field] ?? "";
+  sel.disabled = RANK[me.role] < RANK.operator;
+  sel.addEventListener("change", async () => {
+    try { await api(`/api/sites/${site.id}`, { method: "PATCH", body: JSON.stringify({ [field]: sel.value ? Number(sel.value) : null }) }); toast("대표 계량기를 저장했습니다"); refresh(); }
+    catch (e) { toast(e.message); }
+  });
+  return sel;
+}
 function renderSites() {
-  fill("#t-sites", S.sites, [s => [s.id], s => [s.name], s => [s.address]]);
+  fill("#t-sites", S.sites, [s => [s.id], s => [s.name], s => [s.address], s => mainSelect(s, "main_power_tag_id", "power"), s => mainSelect(s, "main_energy_tag_id", "energy")]);
   fill("#t-gateways", S.gateways, [g => [g.id], g => [g.name], g => [S.sites.find(s => s.id === g.site_id)?.name], g => [ago(g.last_seen_at)], g => [g.agent_version || "—"]]);
 }
 

@@ -74,6 +74,9 @@ class Site(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     address: Mapped[str] = mapped_column(String(300), default="")
+    # representative (incoming) meter used for site power / energy / peak KPIs
+    main_power_tag_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    main_energy_tag_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_site_tenant_name"),)
 

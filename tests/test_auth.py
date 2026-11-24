@@ -5,7 +5,7 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
-    assert body["database"] == "ok" and body["schema_revision"] == "0002" and body["remote_control"] == "disabled"
+    assert body["database"] == "ok" and body["schema_revision"] == "0003" and body["remote_control"] == "disabled"
 
 
 def test_unauthenticated_401(client):

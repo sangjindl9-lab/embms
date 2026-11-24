@@ -90,7 +90,15 @@ class TagIn(BaseModel):
 
 
 def _site(s: Site):
-    return {"id": s.id, "tenant_id": s.tenant_id, "name": s.name, "address": s.address}
+    return {"id": s.id, "tenant_id": s.tenant_id, "name": s.name, "address": s.address,
+            "main_power_tag_id": s.main_power_tag_id, "main_energy_tag_id": s.main_energy_tag_id}
+
+
+class SitePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    address: str | None = Field(default=None, max_length=300)
+    main_power_tag_id: int | None = None
+    main_energy_tag_id: int | None = None
 
 
 def _device(d: Device):
@@ -128,6 +136,23 @@ def create_site(data: SiteIn, request: Request, p: Principal = Depends(require_r
 @router.get("/sites/{site_id}")
 def get_site(site_id: int, p: Principal = Depends(require_role("viewer")), db: Session = Depends(get_db)):
     return _site(get_owned(db, Site, site_id, p))
+
+
+@router.patch("/sites/{site_id}")
+def update_site(site_id: int, data: SitePatch, request: Request, p: Principal = Depends(require_role("operator")), db: Session = Depends(get_db)):
+    s = get_owned(db, Site, site_id, p)
+    changes = data.model_dump(exclude_unset=True)
+    for k in ("main_power_tag_id", "main_energy_tag_id"):
+        if changes.get(k) is not None:
+            t = get_owned(db, Tag, changes[k], p)
+            dev = db.get(Device, t.device_id)
+            if dev.site_id != s.id:
+                raise HTTPException(400, "Tag belongs to a different site")
+    for k, v in changes.items():
+        setattr(s, k, v)
+    audit(db, "site.update", actor=p.user, tenant_id=s.tenant_id, target=f"site:{s.id}", detail=changes, ip=client_ip(request))
+    db.commit()
+    return _site(s)
 
 
 @router.delete("/sites/{site_id}")

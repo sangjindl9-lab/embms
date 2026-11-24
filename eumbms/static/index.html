@@ -154,7 +154,7 @@
     <section data-panel="sites" hidden>
       <h2>사업장</h2>
       <form id="f-site" class="row" data-min-role="operator"><input name="name" placeholder="사업장 이름" required maxlength="200"><input name="address" placeholder="주소" maxlength="300"><button>추가</button></form>
-      <table><thead><tr><th>ID</th><th>이름</th><th>주소</th></tr></thead><tbody id="t-sites"></tbody></table>
+      <table><thead><tr><th>ID</th><th>이름</th><th>주소</th><th>대표 전력 (현재·최대전력)</th><th>대표 전력량 (금일 사용량)</th></tr></thead><tbody id="t-sites"></tbody></table>
       <h2>엣지 게이트웨이</h2>
       <p class="muted">게이트웨이는 현장망 안의 PC·라즈베리파이에서 장치를 읽고, 서버로 아웃바운드 HTTPS 연결만 합니다.</p>
       <form id="f-gateway" class="row" data-min-role="tenant_admin"><select name="site_id" class="sel-sites" required></select><input name="name" placeholder="게이트웨이 이름" required maxlength="200"><button>등록 (토큰 발급)</button></form>
