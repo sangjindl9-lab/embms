@@ -26,10 +26,10 @@ import httpx
 
 try:
     from .codec import REGISTER_COUNT, decode, engineering
-except ImportError:  # executed as a script
+except ImportError:  # executed as a script / packaged exe
     from codec import REGISTER_COUNT, decode, engineering
 
-AGENT_VERSION = "gw-0.1.0"
+AGENT_VERSION = "gw-0.2.0"
 log = logging.getLogger("eum-gateway")
 
 
@@ -188,19 +188,136 @@ class Agent:
             await asyncio.sleep(await self.step())
 
 
-def main():
+# ------------------------------------------------------------------ configuration & CLI
+def base_dir() -> str:
+    """Folder of the .exe when packaged, else the script folder."""
+    import sys
+    return os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+
+
+def load_settings(path: str | None = None) -> dict:
+    """gateway.ini next to the program; environment variables override it."""
+    import configparser
+    cp = configparser.ConfigParser()
+    ini = path or os.path.join(base_dir(), "gateway.ini")
+    if os.path.exists(ini):
+        cp.read(ini, encoding="utf-8-sig")
+    g = lambda sec, key, default="": cp.get(sec, key, fallback=default).strip()
+    return {
+        "server": os.getenv("EUM_SERVER_URL") or g("server", "url"),
+        "token": os.getenv("EUM_GATEWAY_TOKEN") or g("server", "token"),
+        "networks": os.getenv("EUM_ALLOWED_NETWORKS") or g("network", "allowed_networks"),
+        "buffer": os.getenv("EUM_BUFFER_PATH") or g("buffer", "path") or os.path.join(base_dir(), "gateway_buffer.db"),
+        "refresh": int(os.getenv("EUM_CONFIG_REFRESH_S") or g("server", "config_refresh_s", "60") or 60),
+        "insecure": (os.getenv("EUM_ALLOW_INSECURE") or g("server", "allow_insecure", "0")) == "1",
+        "ini": ini,
+    }
+
+
+def list_ports() -> list[tuple[str, str]]:
+    from serial.tools import list_ports as lp
+    return [(p.device, p.description or "") for p in lp.comports()]
+
+
+def _templates():
+    try:
+        from .device_templates import TEMPLATES, tag_defaults
+    except ImportError:
+        from device_templates import TEMPLATES, tag_defaults
+    return TEMPLATES, tag_defaults
+
+
+async def test_device(target: str, template: str, unit_id: int = 1, baudrate: int | None = None, port: int = 502,
+                      client_factory=make_client) -> list[tuple[str, str, str]]:
+    """Read every tag of a template once, without the server. target = COM port / tty path or IP address."""
+    TEMPLATES, tag_defaults = _templates()
+    tpl = TEMPLATES[template]
+    is_ip = all(c.isdigit() or c == "." for c in target)
+    dev = {"id": 0, "protocol": "modbus_tcp" if is_ip else "modbus_rtu", "host": target if is_ip else "",
+           "port": port, "serial_port": "" if is_ip else target, "baudrate": baudrate or tpl.get("baudrate", 9600),
+           "unit_id": unit_id, "tags": [dict(tag_defaults(t), id=i) for i, t in enumerate(tpl["tags"])]}
+    nets = parse_networks(target + "/32") if is_ip else []
+    rows = await poll_device(dev, nets, client_factory)
+    out = []
+    for r, t in zip(rows, dev["tags"]):
+        v = "—" if r["value"] is None else f"{r['value']:.4g}"
+        out.append((t["name"], f"{v} {t['unit']}".strip(), r["quality"]))
+    return out
+
+
+async def check_server(settings: dict) -> str:
+    async with httpx.AsyncClient(timeout=20) as http:
+        r = await http.get(settings["server"].rstrip("/") + "/api/gw/config", headers={"X-Gateway-Token": settings["token"]})
+        if r.status_code == 401:
+            return "실패: 토큰이 올바르지 않습니다 (웹의 사업장·게이트웨이 탭에서 토큰을 다시 발급하세요)"
+        r.raise_for_status()
+        cfg = r.json()
+        devs = cfg["devices"]
+        lines = [f"성공: 서버 연결됨 (게이트웨이 ID {cfg['gateway_id']}), 배정된 장치 {len(devs)}대"]
+        for d in devs:
+            addr = d["serial_port"] if d["protocol"] == "modbus_rtu" else f"{d['host']}:{d['port']}"
+            lines.append(f"  - {d['name']} ({addr}, 국번 {d['unit_id']}) 태그 {len(d['tags'])}개, 수집 {'켜짐' if d['enabled'] else '꺼짐 — 웹에서 수집 시작을 누르세요'}")
+        return "\n".join(lines)
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(prog="EUM-Gateway", description="EUM BMS PRO 현장 게이트웨이")
+    ap.add_argument("--ports", action="store_true", help="연결된 COM(시리얼) 포트 목록")
+    ap.add_argument("--test", metavar="포트또는IP", help="서버 없이 장비를 한 번 읽어 봄 (예: COM3)")
+    ap.add_argument("--template", default="pzem016", help="장비 템플릿 (pzem016, sdm120)")
+    ap.add_argument("--unit", type=int, default=1, help="국번(Unit ID)")
+    ap.add_argument("--baud", type=int, default=None, help="통신속도 (생략 시 템플릿 기본값)")
+    ap.add_argument("--port", type=int, default=502, help="Modbus TCP 포트 (IP 시험 시)")
+    ap.add_argument("--check", action="store_true", help="서버 연결과 토큰 확인")
+    ap.add_argument("--config", default=None, help="설정 파일 경로 (기본: 프로그램 폴더의 gateway.ini)")
+    a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    server = os.environ["EUM_SERVER_URL"]
-    if not server.startswith("https://") and os.getenv("EUM_ALLOW_INSECURE") != "1":
-        raise SystemExit("EUM_SERVER_URL must use https://")
-    networks = parse_networks(os.getenv("EUM_ALLOWED_NETWORKS", ""))
+
+    if a.ports:
+        ports = list_ports()
+        print("연결된 포트가 없습니다. USB-RS485 컨버터를 꽂고 드라이버(CH340)를 확인하세요." if not ports
+              else "\n".join(f"{d}\t{desc}" for d, desc in ports))
+        return 0
+    if a.test:
+        TEMPLATES, _ = _templates()
+        if a.template not in TEMPLATES or TEMPLATES[a.template]["protocol"] == "simulator":
+            print("템플릿 이름 오류. 사용 가능:", ", ".join(k for k, v in TEMPLATES.items() if v["protocol"] != "simulator"))
+            return 2
+        rows = asyncio.run(test_device(a.test, a.template, a.unit, a.baud, a.port))
+        print(f"[{TEMPLATES[a.template]['name']}] {a.test} 국번 {a.unit}")
+        for name, val, q in rows:
+            print(f"  {name:<10} {val:<16} {'정상' if q == 'Good' else '실패'}")
+        if all(q != "Good" for _, _, q in rows):
+            print("\n모두 실패: 배선(A·B 바뀜), 포트 번호, 국번, 통신속도를 확인하세요.")
+            return 1
+        return 0
+
+    st = load_settings(a.config)
+    if not st["server"] or not st["token"]:
+        print(f"설정이 비어 있습니다. {st['ini']} 파일에 서버 주소(url)와 토큰(token)을 넣으세요.")
+        return 2
+    if not st["server"].startswith("https://") and not st["insecure"]:
+        print("서버 주소는 https:// 로 시작해야 합니다.")
+        return 2
+    if a.check:
+        try:
+            print(asyncio.run(check_server(st)))
+            return 0
+        except Exception as exc:
+            print("실패: 서버에 연결할 수 없습니다 —", exc)
+            return 1
+    networks = parse_networks(st["networks"])
     if not networks:
-        log.warning("EUM_ALLOWED_NETWORKS not set: Modbus TCP devices are blocked; serial (RTU) devices still work")
-    agent = Agent(server, os.environ["EUM_GATEWAY_TOKEN"], networks,
-                  Buffer(os.getenv("EUM_BUFFER_PATH", "gateway_buffer.db")),
-                  config_refresh_s=int(os.getenv("EUM_CONFIG_REFRESH_S", "60")))
-    asyncio.run(agent.run())
+        log.warning("allowed_networks 미설정: Modbus TCP 장치는 차단되고, 시리얼(RTU) 장치만 수집합니다")
+    log.info("EUM 게이트웨이 %s 시작 — 서버 %s (종료: Ctrl+C)", AGENT_VERSION, st["server"])
+    agent = Agent(st["server"], st["token"], networks, Buffer(st["buffer"]), config_refresh_s=st["refresh"])
+    try:
+        asyncio.run(agent.run())
+    except KeyboardInterrupt:
+        log.info("종료")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

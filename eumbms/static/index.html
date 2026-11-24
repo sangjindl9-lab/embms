@@ -157,6 +157,7 @@
       <table><thead><tr><th>ID</th><th>이름</th><th>주소</th><th>대표 전력 (현재·최대전력)</th><th>대표 전력량 (금일 사용량)</th></tr></thead><tbody id="t-sites"></tbody></table>
       <h2>엣지 게이트웨이</h2>
       <p class="muted">게이트웨이는 현장망 안의 PC·라즈베리파이에서 장치를 읽고, 서버로 아웃바운드 HTTPS 연결만 합니다.</p>
+      <p><a class="dl" href="https://github.com/sangjindl9-lab/embms/releases/latest/download/EUM-Gateway-Windows.zip" rel="noopener">Windows용 게이트웨이 설치파일 받기 (zip)</a> <span class="muted">— 압축 해제 후 설치안내.txt 순서대로 진행</span></p>
       <form id="f-gateway" class="row" data-min-role="tenant_admin"><select name="site_id" class="sel-sites" required></select><input name="name" placeholder="게이트웨이 이름" required maxlength="200"><button>등록 (토큰 발급)</button></form>
       <pre id="gw-token" class="token" hidden></pre>
       <table><thead><tr><th>ID</th><th>이름</th><th>사업장</th><th>최근 접속</th><th>에이전트</th></tr></thead><tbody id="t-gateways"></tbody></table>

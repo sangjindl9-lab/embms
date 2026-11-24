@@ -52,6 +52,15 @@ EUM_SERVER_URL=https://<서버> EUM_GATEWAY_TOKEN=gw_... EUM_ALLOWED_NETWORKS=19
 - 가상 수변전실: 실제 장비 없이 화면·경보를 시험하는 시뮬레이터 장치 (서버에서 값 생성, 현장 장비에 접속하지 않음)
 - 데이터 보존: 측정값 READINGS_RETENTION_DAYS(기본 90일), 해제된 경보 365일
 
+## Windows 게이트웨이 패키지
+
+`gateway-v*` 태그를 올리면 GitHub Actions가 Windows exe를 빌드·시험(시뮬레이터로 PZEM-016 프레임 읽기)하고 릴리스에 zip을 올립니다.
+다운로드: https://github.com/sangjindl9-lab/embms/releases/latest/download/EUM-Gateway-Windows.zip
+
+- `EUM-Gateway.exe --ports` 포트 찾기 · `--test COM3 --template pzem016` 서버 없이 장비 읽기 · `--check` 서버/토큰 확인
+- 설정: 프로그램 폴더의 `gateway.ini` (url, token, allowed_networks) — 환경변수가 있으면 우선
+- `gateway/device_templates.py`는 `eumbms/templates.py`의 사본 (테스트로 동기화 확인)
+
 ## 원격제어
 
 **비활성.** 쓰기(FC5/6/15/16) 경로가 코드에 없습니다. P6(이중 승인·인터록·실장비 시험) 완료 전까지 구현하지 않습니다.

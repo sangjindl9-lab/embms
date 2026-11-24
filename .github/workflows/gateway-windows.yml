@@ -1,0 +1,62 @@
+name: gateway-windows
+
+on:
+  push:
+    tags: ["gateway-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r gateway/requirements.txt pyinstaller==6.11.1
+      - name: Build exe
+        run: >
+          pyinstaller --onefile --console --name EUM-Gateway --paths gateway
+          --hidden-import codec --hidden-import device_templates
+          --hidden-import serial.tools.list_ports --collect-submodules pymodbus
+          gateway/agent.py
+      - name: Smoke test (ports, help, PZEM-016 read via TCP simulator)
+        shell: pwsh
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+          ./dist/EUM-Gateway.exe --ports
+          ./dist/EUM-Gateway.exe --help
+          $sim = Start-Process python -ArgumentList "gateway/ci/pzem_sim.py","5020","40" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 4
+          $out = ./dist/EUM-Gateway.exe --test 127.0.0.1 --port 5020 --template pzem016 --unit 1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "exe test read failed" }
+          if ($out -notmatch "230.1 V") { throw "unexpected decoded value" }
+          Stop-Process -Id $sim.Id -ErrorAction SilentlyContinue
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path pkg/EUM-Gateway | Out-Null
+          Copy-Item dist/EUM-Gateway.exe pkg/EUM-Gateway/
+          Copy-Item gateway/windows/* pkg/EUM-Gateway/
+          Compress-Archive -Path pkg/EUM-Gateway -DestinationPath EUM-Gateway-Windows.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EUM-Gateway-Windows
+          path: EUM-Gateway-Windows.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/gateway-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EUM-Gateway-Windows.zip
+          name: EUM 게이트웨이 ${{ github.ref_name }} (Windows)
+          body: |
+            현장 PC용 EUM BMS PRO 게이트웨이입니다. 압축을 풀고 `설치안내.txt` 순서대로 진행하세요.
+            - 1-포트찾기 / 2-장비시험(서버 없이 PZEM-016·SDM120 읽기) / 3-서버연결확인 / 4-게이트웨이실행 / 5-자동시작등록
+            - 읽기 전용(제어 기능 없음), 인터넷 끊김 시 PC에 임시 저장 후 자동 전송

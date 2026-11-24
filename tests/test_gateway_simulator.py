@@ -125,3 +125,45 @@ def test_agent_end_to_end_with_outage_buffering(client, tenant_pair, tmp_path):
     assert len(hist) >= 2
     gws = client.get("/api/gateways", headers=a["viewer"]).json()
     assert next(x for x in gws if x["id"] == g["id"])["agent_version"] == gw.AGENT_VERSION
+
+
+def test_device_templates_in_sync():
+    """gateway/device_templates.py is a copy of eumbms/templates.py (the exe ships without the server)."""
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "gateway" / "device_templates.py").read_text(encoding="utf-8") == (root / "eumbms" / "templates.py").read_text(encoding="utf-8")
+
+
+def test_cli_test_mode_reads_pzem016_frame():
+    """`EUM-Gateway --test` reads a PZEM-016 register frame from a simulator and decodes engineering values."""
+    async def run():
+        port = _free_port()
+        ir = [0] * 20
+        ir[0:10] = [2301, 1234, 0, 2839, 0, 12345, 0, 600, 92, 0]  # 230.1V 1.234A 283.9W 12345Wh 60.0Hz PF0.92
+        store = ModbusSlaveContext(ir=ModbusSequentialDataBlock(1, ir), hr=ModbusSequentialDataBlock(1, [0] * 20),
+                                   co=ModbusSequentialDataBlock(1, [False] * 20), di=ModbusSequentialDataBlock(1, [False] * 20))
+        server = ModbusTcpServer(ModbusServerContext(slaves={1: store}, single=False), address=("127.0.0.1", port))
+        task = asyncio.create_task(server.serve_forever())
+        await asyncio.sleep(0.3)
+        try:
+            return await gw.test_device("127.0.0.1", "pzem016", unit_id=1, port=port)
+        finally:
+            await server.shutdown(); task.cancel()
+    rows = {n: (v, q) for n, v, q in asyncio.run(run())}
+    assert rows["전압"] == ("230.1 V", "Good") and rows["전류"] == ("1.234 A", "Good")
+    assert rows["유효전력"][0] == "0.2839 kW" and rows["누적전력량"][0] == "12.35 kWh"
+    assert rows["역률"][0] == "0.92" and rows["주파수"][0] == "60 Hz"
+
+
+def test_settings_file_and_env_override(tmp_path, monkeypatch):
+    ini = tmp_path / "gateway.ini"
+    ini.write_text("﻿[server]\nurl = https://example.test\ntoken = gw_abc\n[network]\nallowed_networks = 192.168.1.0/24\n", encoding="utf-8")
+    for k in ("EUM_SERVER_URL", "EUM_GATEWAY_TOKEN", "EUM_ALLOWED_NETWORKS"):
+        monkeypatch.delenv(k, raising=False)
+    st = gw.load_settings(str(ini))
+    assert st["server"] == "https://example.test" and st["token"] == "gw_abc" and st["networks"] == "192.168.1.0/24"
+    monkeypatch.setenv("EUM_GATEWAY_TOKEN", "gw_env")
+    assert gw.load_settings(str(ini))["token"] == "gw_env"
+    # missing config -> friendly exit code, no crash
+    monkeypatch.delenv("EUM_GATEWAY_TOKEN")
+    assert gw.main(["--config", str(tmp_path / "none.ini")]) == 2
+    assert gw.main(["--ports"]) == 0
